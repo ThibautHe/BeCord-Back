@@ -1,13 +1,15 @@
 const mongoose = require("mongoose");
+const dotenv = require('dotenv');
+
+dotenv.config({ path: '../.env' });
 
 module.exports = {
-  connectToDb: (cb) => {
+  connectToDb: (cb) => {    
     mongoose
-      .connect(
-        "mongodb+srv://thibauthellinckx:xfZz8GKL5SWCkpIS@cluster0.yumnd.mongodb.net/BeCode-Becord?retryWrites=true&w=majority&appName=Cluster0"
-      )
-      .then(() => console.log("connected to database"));
-
-    cb();
+      .connect(process.env.MONGODB_URI)
+      .then(() => {
+        console.log("connected to database");
+        cb();
+      })
   },
 };
