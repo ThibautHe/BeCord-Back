@@ -35,7 +35,7 @@ connectToDb(() => {
 });
 
 app.post("/register", async (req, res) => {
-  const { email, password, username } = req.body;
+  const { email, password } = req.body;
   try {
     const existingUser = await userSchema.findOne({ email });
     if (existingUser) {
@@ -47,14 +47,24 @@ app.post("/register", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const user = new userSchema({
-      username,
       email,
       password: hashedPassword,
     });
 
     user.save();
 
-    res.status(201).json({ message: "user created" });
+    const token = jwt.sign(
+      { id: user._id, lobbies:user.lobbies },
+      process.env.JWT_SECRET
+    );
+
+    res.cookie('token', token, {
+      httpOnly: true, // Prevent client-side JavaScript from accessing the cookie
+      secure: process.env.NODE_ENV === 'production', // Only send over HTTPS in production
+      sameSite: 'strict', // Protect against CSRF attacks
+    });
+
+    res.status(200).json({ message: " register Successful", success: true, token: token });
   } catch {
     res.status(500).json({ err: "erreur lors de la creation de profile", err });
   }
@@ -65,28 +75,27 @@ app.post("/login", async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      res.json({ message: "no email or password provided" });
+      res.json({ message: "no email or password provided", success: false }); // Return an error message
       throw new Error("no email or password provided");
     }
 
     const user = await userSchema.findOne({ email });
     if (!user) {
       console.log("Utilisateur non trouvé");
-      return res.status(404).json({ message: "Utilisateur non trouvé." });
+      return res.status(404).json({ message: "Utilisateur non trouvé.", success: false });
     }
 
     // Vérifier le mot de passe
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       console.log("Mot de passe incorrect");
-      return res.status(401).json({ message: "Mot de passe incorrect." });
+      return res.status(401).json({ message: "Mot de passe incorrect.", success: false });
     }
 
     const token = jwt.sign(
       {
         id: user._id,
         role: user.role,
-        username: user.username,
         lobbies: user.lobbies,
       },
       process.env.JWT_SECRET
@@ -98,7 +107,7 @@ app.post("/login", async (req, res) => {
       sameSite: "strict", // Protect against CSRF attacks
     });
 
-    res.json({ message: " login Successful", token: token });
+    res.json({ message: " login Successful", success: true, token: token });
   } catch (error) {
     console.log(error);
 

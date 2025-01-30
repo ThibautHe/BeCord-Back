@@ -3,7 +3,6 @@ const LobbySchema = require("./LobbySchema");
 
 const UserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
-  username: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   status: Boolean,
   lobbies: [{ type: mongoose.Schema.Types.ObjectId, ref: "lobby" }],
