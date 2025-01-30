@@ -8,11 +8,22 @@ const verifyToken = require("./verifyJwt");
 const { connectToDb } = require("./db");
 const dotenv = require("dotenv");
 const cookieParser = require("cookie-parser");
+const cors = require("cors");
 const API_URL = "http://localhost:3000";
+const API_FETCH = "http://localhost:5173";
 
 dotenv.config();
 
 const app = express();
+
+app.use(
+  cors({
+    origin: API_FETCH,
+    credentials: true,
+    methods: "GET, POST, PUT, DELETE",
+    allowedHeaders: "Content-Type, Authorization",
+  })
+); // Enable CORS
 
 app.use(express.json());
 app.use(cookieParser()); // Enable cookie parsing
@@ -23,7 +34,7 @@ connectToDb(() => {
   });
 });
 
-app.post(`${API_URL}/register`, async (req, res) => {
+app.post("/register", async (req, res) => {
   const { email, password, username } = req.body;
   try {
     const existingUser = await userSchema.findOne({ email });
@@ -49,11 +60,12 @@ app.post(`${API_URL}/register`, async (req, res) => {
   }
 });
 
-app.post(`${API_URL}/login`, async (req, res) => {
+app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password) {
+      res.json({ message: "no email or password provided" });
       throw new Error("no email or password provided");
     }
 
@@ -94,7 +106,7 @@ app.post(`${API_URL}/login`, async (req, res) => {
   }
 });
 
-app.get(`${API_URL}/users`, verifyToken, async (req, res) => {
+app.get("/users", verifyToken, async (req, res) => {
   try {
     const lobby = await userSchema.find(); // Fetch all items from the collection
 
@@ -106,7 +118,7 @@ app.get(`${API_URL}/users`, verifyToken, async (req, res) => {
   }
 });
 
-app.get(`${API_URL}/users/:id`, verifyToken, async (req, res) => {
+app.get("/users/:id", verifyToken, async (req, res) => {
   const id = req.params.id;
 
   try {
@@ -120,7 +132,7 @@ app.get(`${API_URL}/users/:id`, verifyToken, async (req, res) => {
   }
 });
 
-app.get(`${API_URL}/lobbies`, verifyToken, async (req, res) => {
+app.get("/lobbies", verifyToken, async (req, res) => {
   try {
     const lobby = await LobbySchema.find(); // Fetch all items from the collection
 
@@ -134,7 +146,7 @@ app.get(`${API_URL}/lobbies`, verifyToken, async (req, res) => {
   }
 });
 
-app.get(`${API_URL}/lobbies/:id`, verifyToken, async (req, res) => {
+app.get("/lobbies/:id", verifyToken, async (req, res) => {
   const id = req.params.id;
 
   try {
@@ -148,7 +160,7 @@ app.get(`${API_URL}/lobbies/:id`, verifyToken, async (req, res) => {
   }
 });
 
-app.post(`${API_URL}/createLobby`, verifyToken, (req, res) => {
+app.post("/createLobby", verifyToken, (req, res) => {
   const user = req.user;
 
   const lobby = new LobbySchema({ admin: user.id });
@@ -158,16 +170,16 @@ app.post(`${API_URL}/createLobby`, verifyToken, (req, res) => {
   res.json(lobby);
 });
 
-app.post(`${API_URL}/createInviteLink`, verifyToken, (req, res) => {
+app.post("/createInviteLink", verifyToken, (req, res) => {
   const user = req.user;
   const currentLobby = req.body.serverId;
 
-  const link = `http://localhost:3000/joinLobby/${currentLobby}`;
+  const link = `${API_URL}/joinLobby/${currentLobby}`;
 
   res.json({ serverlink: link });
 });
 
-app.put(`${API_URL}/joinLobby/:id`, verifyToken, async (req, res) => {
+app.put("/joinLobby/:id", verifyToken, async (req, res) => {
   try {
     const user = req.user; // The current user from the JWT token
     const lobbyId = req.params.id; // Corrected: use `id` from the route params
