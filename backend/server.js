@@ -7,12 +7,13 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const dotenv = require('dotenv');
 const cookieParser = require("cookie-parser");
-
+const cookie = require("cookie");
 const userSchema = require("../models/UserSchema");
 const messageSchema = require("../models/MessageSchema");
 const lobbySchema = require("../models/LobbySchema");
 const verifyToken = require("./verifyJwt");
 const { connectToDb } = require("./db");
+const { decode } = require('punycode');
 const API_URL = "http://localhost:3000";
 const API_FETCH = "http://localhost:5173";
 
@@ -35,6 +36,7 @@ const io = new Server(server, {
   cors: {
     origin: ["http://localhost:3000", "http://localhost:5173"], // ✅ Autorise les deux ports
     methods: ["GET", "POST"],
+    withCredentials: true,
   },
 });
 
@@ -51,12 +53,19 @@ connectToDb(() => {
 io.on('connection', (socket) => {
   console.log('A user is connected: ' + socket.id);
 
+  const cookies = cookie.parse(socket.handshake.headers.cookie || ""); // Parse cookies
+  const token = cookies.token; // Extract JWT token
+
+  const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  
+  console.log(decoded.id);
+  
   // Handle joining a channel (lobby)
   socket.on('join_channel', async (channelId) => {
-    const user = await userSchema.findById(ObjectId(socket.id));
+    const user = await userSchema.findById(decoded.id);
     if (user) {
       socket.join(channelId);
-      console.log(`User ${socket.id} joined channel ${channelId}`);
+      console.log(`User ${user.email} joined channel ${channelId}`);
     }
   });
 
@@ -73,16 +82,22 @@ io.on('connection', (socket) => {
 
     try {
       // Save message to DB
-      const message = new Message({
+      const message = new messageSchema({
         message: text,
-        user: sender,
+        user: decoded.id,
         lobby: channel,
       });
       const savedMessage = await message.save();
 
+      await lobbySchema.findByIdAndUpdate(
+        channel,
+        { $push: { messages: savedMessage._id } },
+        { new: true }
+      );
+
       // Emit the message to all users in the channel
       io.to(channel).emit('receive_message_from_channel', {
-        sender,
+        sender:decoded.id,
         text,
         created_at: savedMessage.createdAt, // Include timestamp from DB
         messageId: savedMessage._id, // Optionally, include message ID
@@ -336,7 +351,7 @@ app.get("/users/:id", verifyToken, async (req, res) => {
   }
 });
 
-app.get("/lobbies", verifyToken, async (req, res) => {
+app.get("/lobbies", async (req, res) => {
   try {
     const lobby = await lobbySchema.find()  // Fetch all items from the collection
 
