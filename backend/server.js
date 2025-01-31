@@ -42,7 +42,7 @@ app.use(express.json());
 app.use(cookieParser()); // Enable cookie parsing
 
 connectToDb(() => {
-  app.listen(3000, () => {
+  server.listen(3000, () => {
     console.log("app is listening on port " + 3000);
   });
 });
@@ -53,7 +53,7 @@ io.on('connection', (socket) => {
 
   // Handle joining a channel (lobby)
   socket.on('join_channel', async (channelId) => {
-    const user = await userSchema.findById(socket.id);
+    const user = await userSchema.findById(ObjectId(socket.id));
     if (user) {
       socket.join(channelId);
       console.log(`User ${socket.id} joined channel ${channelId}`);
