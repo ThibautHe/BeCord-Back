@@ -61,53 +61,102 @@ io.on('connection', (socket) => {
   console.log(decoded.id);
   
   // Handle joining a channel (lobby)
-  socket.on('join_channel', async (channelId) => {
+  socket.on('join_channel', async (channel) => {
+
+    console.log("CHANNEL ID :", channel._id);
+    
     const user = await userSchema.findById(decoded.id);
     if (user) {
-      socket.join(channelId);
-      console.log(`User ${user.email} joined channel ${channelId}`);
+      socket.join(channel._id);
+      console.log(`User ${user.email} joined channel ${channel.name}`);
     }
   });
 
   // Handle leaving a channel (lobby)
-  socket.on('leave_channel', (channelId) => {
-    socket.leave(channelId);
-    console.log(`User ${socket.id} left channel ${channelId}`);
+  socket.on('leave_channel', (channel) => {
+    socket.leave(channel);
+    console.log(`User ${socket.id} left channel ${channel}`);
   });
 
-  // Handle sending a message to a specific channel
-  socket.on('send_message_to_channel', async (data) => {
-    const { channel, sender, text } = data;
-    console.log(`Message in channel ${channel}: ${text}`);
+    // Modifier un channel
+    app.put("/channel/:channelName", async (req, res) => {
+      const { channelName } = req.params;
+      const { newChannelName } = req.body;
+  
+      try {
+        const existingChannel = await Channel.findOne({ name: newChannelName });
+        if (existingChannel) {
+          return res.status(400).json({ error: "Le nom du channel existe déjà." });
+        }
+  
+        const channel = await Channel.findOneAndUpdate(
+          { name: channelName },
+          { name: newChannelName },
+          { new: true }
+        );
+  
+        if (!channel) {
+          return res.status(404).json({ error: "Channel introuvable" });
+        }
+  
+        io.emit("channel_updated", { oldName: channelName, newName: newChannelName });
+        res.status(200).json({ message: "Channel modifié" });
+      } catch (err) {
+        console.error("Erreur modification channel:", err);
+        res.status(500).json({ error: "Erreur modification channel" });
+      }
+    });
+  
+    // Supprimer un channel et ses messages
+    app.delete("/channel/:channelName", async (req, res) => {
+      const { channelName } = req.params;
+      try {
+        await Channel.deleteOne({ name: channelName });
+        await Message.deleteMany({ channel: channelName });
+        io.emit("channel_deleted", channelName); // Notifier tous les clients
+        res.status(200).json({ message: "Channel supprimé" });
+      } catch (err) {
+        res.status(500).json({ error: "Erreur lors de la suppression" });
+      }
+    });
 
-    try {
-      // Save message to DB
-      const message = new messageSchema({
-        message: text,
-        user: decoded.id,
-        lobby: channel,
-      });
-      const savedMessage = await message.save();
+    socket.on('send_message_to_channel', async (data) => {
+      const { channel, sender, text } = data;
+      console.log(`Message in channel ${channel.name}: ${text}`);
+  
+      try {
+          // Save message to DB
+          const message = new messageSchema({
+              message: text,
+              user: decoded.id, // Assuming sender is the user ID
+              lobby: channel._id, // Assuming channel is the lobby ID
+          });
+  
+          const savedMessage = await message.save();
+  
+          // Populate user to get the email
+          const populatedMessage = await messageSchema.findById(savedMessage._id)
+          .populate({ path: 'user', select: 'email' }); 
 
-      await lobbySchema.findByIdAndUpdate(
-        channel,
-        { $push: { messages: savedMessage._id } },
-        { new: true }
-      );
+          // Add message ID to lobby
+          await lobbySchema.findByIdAndUpdate(
+              channel._id,
+              { $push: { messages: savedMessage._id } },
+              { new: true }
+          );
+  
+          console.log('Message saved:', populatedMessage);
 
-      // Emit the message to all users in the channel
-      io.to(channel).emit('receive_message_from_channel', {
-        sender:decoded.id,
-        text,
-        created_at: savedMessage.createdAt, // Include timestamp from DB
-        messageId: savedMessage._id, // Optionally, include message ID
-      });
-
-      console.log('Message saved to DB:', savedMessage);
-    } catch (error) {
-      console.error('Error saving message:', error);
-    }
+          // Emit message to all users in the channel with populated user info
+          io.to(channel._id).emit('receive_message_from_channel',
+            populatedMessage
+          );
+  
+      } catch (error) {
+          console.error('Error saving message:', error);
+      }
   });
+  
 
   // Handle user disconnect
   socket.on('disconnect', () => {
@@ -118,6 +167,11 @@ io.on('connection', (socket) => {
 app.post("/register", async (req, res) => {
   const { email, password } = req.body;
   try {
+    if(!email || !password)
+      {
+        return res.status(401).json({error:"no password or email provided"})
+      }
+
     const existingUser = await userSchema.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: "Cet email est déjà utilisé." });
@@ -158,8 +212,7 @@ app.post("/login", async (req, res) => {
 
     if(!email || !password)
     {
-      res.status(401).json({error:"no password or email provided"})
-      throw new Error("no email or password provided")
+      return res.status(401).json({error:"no password or email provided"})
     }
 
     const user = await userSchema.findOne({email});
@@ -187,53 +240,8 @@ app.post("/login", async (req, res) => {
     });
 
     res.status(200).json({ message: " register Successful", success: true, token: token });
-  } catch {
-    res.status(500).json({ err: "erreur lors de la creation de profile", err });
-  }
-});
-
-app.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      res.json({ message: "no email or password provided", success: false }); // Return an error message
-      throw new Error("no email or password provided");
-    }
-
-    const user = await userSchema.findOne({ email });
-    if (!user) {
-      console.log("Utilisateur non trouvé");
-      return res.status(404).json({ message: "Utilisateur non trouvé.", success: false });
-    }
-
-    // Vérifier le mot de passe
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      console.log("Mot de passe incorrect");
-      return res.status(401).json({ message: "Mot de passe incorrect.", success: false });
-    }
-
-    const token = jwt.sign(
-      {
-        id: user._id,
-        role: user.role,
-        lobbies: user.lobbies,
-      },
-      process.env.JWT_SECRET
-    );
-
-    res.cookie("token", token, {
-      httpOnly: true, // Prevent client-side JavaScript from accessing the cookie
-      secure: process.env.NODE_ENV === "production", // Only send over HTTPS in production
-      sameSite: "strict", // Protect against CSRF attacks
-    });
-
-    res.json({ message: " login Successful", success: true, token: token });
-  } catch (error) {
-    console.log(error);
-
-    res.json(error);
+  } catch(error) {
+    res.status(500).json({ err: "erreur lors de la creation de profile",error });
   }
 });
 
@@ -279,13 +287,20 @@ app.post("/message/:serverid", verifyToken, async (req, res) => {
 });
 
 
-app.get("/messages/:serverid", verifyToken, async (req, res) => {
+app.get("/lobbyMessages/:serverid", verifyToken, async (req, res) => {
   const lobbyId = req.params.serverid; // Lobby ID from the request params
   const userId = req.user.id; // User ID from the token
 
   try {
     // Find the lobby by its ID
-    const lobby = await lobbySchema.findById(lobbyId).populate('messages').populate('usersId');
+    const lobby = await lobbySchema
+  .findById(lobbyId)
+  .populate({
+    path: 'messages',
+    populate: { path: 'user', select: 'email' } // Récupère les infos des utilisateurs
+  })
+  .populate('usersId'); 
+
 
     if (!lobby) {
       return res.status(404).json({ message: "Lobby not found." });
@@ -379,15 +394,22 @@ app.get("/lobbies/:id", verifyToken, async (req, res) => {
   }
 });
 
-app.post("/createLobby", verifyToken, (req, res) => {
+app.post("/createLobby", verifyToken, async (req, res) => {
   const user = req.user;
+  const { name } = req.body; // Name is optional
 
-  const lobby = new lobbySchema({admin:user.id})
+  try {
+    // Create and save the new lobby
+    const lobby = new lobbySchema({ name,user:user.id, admin: user.id });
+    const savedLobby = await lobby.save();
 
-  lobby.save();
-
-  res.json(lobby);
+    res.json(savedLobby); // Return the created lobby
+  } catch (error) {
+    console.error("Erreur lors de la création du lobby:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
 });
+
 
 app.post("/createInviteLink", verifyToken, (req, res) => {
   const user = req.user;

@@ -3,6 +3,7 @@ const MessagesSchema = require("./MessageSchema");
 const UserSchema = require("./UserSchema");
 
 const LobbySchema = new mongoose.Schema({
+  name:{type:String},
   messages: [{ type: mongoose.Schema.Types.ObjectId, ref: "messages" }],
   usersId: [{ type: mongoose.Schema.Types.ObjectId, ref: "user" }],
   admin: [{ type: mongoose.Schema.Types.ObjectId, ref: "user" }],
