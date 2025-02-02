@@ -13,9 +13,9 @@ const messageSchema = require("../models/MessageSchema");
 const lobbySchema = require("../models/LobbySchema");
 const verifyToken = require("./verifyJwt");
 const { connectToDb } = require("./db");
-const { decode } = require('punycode');
 const API_URL = "http://localhost:3000";
 const API_FETCH = "http://localhost:5173";
+const { ObjectId } = require("mongodb");
 
 dotenv.config();
 
@@ -34,7 +34,7 @@ app.use(
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://localhost:5173"], // ✅ Autorise les deux ports
+    origin: ["http://localhost:3000","http://localhost:5173"], // ✅ Autorise les deux ports
     methods: ["GET", "POST"],
     withCredentials: true,
   },
@@ -289,7 +289,7 @@ app.post("/message/:serverid", verifyToken, async (req, res) => {
 
 app.get("/lobbyMessages/:serverid", verifyToken, async (req, res) => {
   const lobbyId = req.params.serverid; // Lobby ID from the request params
-  const userId = req.user.id; // User ID from the token
+  const userId = new ObjectId(req.user.id); // User ID from the token
 
   try {
     // Find the lobby by its ID
@@ -301,13 +301,16 @@ app.get("/lobbyMessages/:serverid", verifyToken, async (req, res) => {
   })
   .populate('usersId'); 
 
+  console.log(lobby.usersId)
 
     if (!lobby) {
       return res.status(404).json({ message: "Lobby not found." });
     }
 
-    // Check if the user is in the lobby
-    if (!lobby.usersId.includes(userId) && !lobby.admin.includes(userId)) {
+    const isMember = lobby.usersId.some((user) => user.equals(userId));
+    const isAdmin = lobby.admin.some((adminId) => adminId.equals(userId));
+
+    if (!isMember && !isAdmin) {
       return res.status(403).json({ message: "You are not part of this lobby." });
     }
 
@@ -366,19 +369,25 @@ app.get("/users/:id", verifyToken, async (req, res) => {
   }
 });
 
-app.get("/lobbies", async (req, res) => {
+app.get("/lobbies", verifyToken, async (req, res) => {
   try {
-    const lobby = await lobbySchema.find()  // Fetch all items from the collection
+    console.log(req.user);
+    
+    const userId = req.user.id; // Get the user ID from the token
 
-    console.log(lobby);
+    const lobbies = await lobbySchema.find({
+      $or: [{ usersId: userId }, { admin: userId }]
+    });
 
-    res.status(200).json(lobby); // Return the lobby data in the response
+    res.status(200).json(lobbies);
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Erreur lors de la récupération des lobbies.", error });
+    res.status(500).json({
+      message: "Erreur lors de la récupération des lobbies.",
+      error,
+    });
   }
 });
+
 
 app.get("/lobbies/:id", verifyToken, async (req, res) => {
   const id = req.params.id;
